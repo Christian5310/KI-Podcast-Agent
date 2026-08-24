@@ -9,6 +9,7 @@ wo nicht"). Dedupe/Cross-Check/Fortsetzungserkennung kommen in process.py
 Test direkt ausfuehrbar: python -m src.collect
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import mktime
@@ -16,6 +17,9 @@ from time import mktime
 import feedparser
 
 from src.config import FEEDS, Feed
+
+_TAG_RE = re.compile(r"<[^>]+>")
+MAX_SUMMARY_CHARS = 3000  # genug fuer Faktencheck, ohne Prompts unnoetig aufzublaehen
 
 
 @dataclass
@@ -25,6 +29,23 @@ class RawItem:
     url: str
     summary: str
     published: datetime | None
+
+
+def _strip_html(raw: str) -> str:
+    return _TAG_RE.sub(" ", raw).replace("&nbsp;", " ").replace("&amp;", "&").strip()
+
+
+def _best_text(entry) -> str:
+    """Nimmt den vollstaendigsten verfuegbaren Text (RSS 'summary' ist oft nur ein
+    Teaser-Satz, viele Feeds liefern in 'content' den vollen/laengeren Artikeltext -
+    wichtig, damit Manuskript- und Faktencheck-Agent genug Substanz zum Pruefen haben)."""
+    candidates = []
+    if entry.get("content"):
+        candidates.append(entry["content"][0].get("value", ""))
+    if entry.get("summary"):
+        candidates.append(entry["summary"])
+    best = max(candidates, key=len, default="")
+    return _strip_html(best)[:MAX_SUMMARY_CHARS]
 
 
 def _parse_published(entry) -> datetime | None:
@@ -44,7 +65,7 @@ def fetch_feed(feed: Feed) -> list[RawItem]:
                 source=feed.name,
                 title=entry.get("title", "").strip(),
                 url=entry.get("link", "").strip(),
-                summary=entry.get("summary", "").strip(),
+                summary=_best_text(entry),
                 published=_parse_published(entry),
             )
         )

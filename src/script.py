@@ -6,7 +6,6 @@ die zwei Qualitaets-Schritte Manuskript + Faktencheck, nicht ueberall - Kriteriu
 
 import anthropic
 
-from src.collect import RawItem
 from src.config import ANTHROPIC_API_KEY
 
 MODEL = "claude-sonnet-5"
@@ -26,14 +25,26 @@ Regeln:
 """
 
 
-def build_user_prompt(topics: list[RawItem]) -> str:
-    lines = ["Die heutigen Themen (Titel, Quelle, Kurzfassung, URL):\n"]
+def build_user_prompt(topics: list[dict], previous_issues: list[str] | None = None) -> str:
+    lines = ["Die heutigen Themen (Titel, Kurzfassung, Quellen, ggf. Fortsetzungshinweis):\n"]
     for i, t in enumerate(topics, 1):
-        lines.append(f"{i}. {t.title} [{t.source}]\n   {t.summary}\n   Quelle: {t.url}\n")
+        sources = ", ".join(t.get("source_urls", []))
+        entry = f"{i}. {t['title']}\n   {t['summary']}\n   Quelle(n): {sources}"
+        if t.get("whats_new"):
+            entry += f"\n   FORTSETZUNG - knuepfe am letzten Stand an, das ist neu: {t['whats_new']}"
+        lines.append(entry)
+
+    if previous_issues:
+        lines.append(
+            "\nACHTUNG - der letzte Entwurf hatte folgende Faktenfehler, bitte diesmal vermeiden "
+            "(nur schreiben, was oben in den Quellen tatsaechlich steht, im Zweifel weglassen):"
+        )
+        lines.extend(f"- {issue}" for issue in previous_issues[:8])
+
     return "\n".join(lines)
 
 
-def generate_script(topics: list[RawItem]) -> tuple[str, dict]:
+def generate_script(topics: list[dict], previous_issues: list[str] | None = None) -> tuple[str, dict]:
     """Erzeugt das Manuskript. Gibt (text, usage_info) zurueck - usage_info fuer
     das Kosten-Logging (D1), auch wenn die DB-Anbindung dafuer erst Phase 3 kommt."""
     if not ANTHROPIC_API_KEY:
@@ -44,7 +55,7 @@ def generate_script(topics: list[RawItem]) -> tuple[str, dict]:
         model=MODEL,
         max_tokens=8192,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_user_prompt(topics)}],
+        messages=[{"role": "user", "content": build_user_prompt(topics, previous_issues)}],
     )
     text = "".join(block.text for block in response.content if block.type == "text")
     usage = {
@@ -56,10 +67,10 @@ def generate_script(topics: list[RawItem]) -> tuple[str, dict]:
 
 
 if __name__ == "__main__":
-    from src.collect import collect_all
-    from src.select import select_placeholder
+    from src.db import get_client
+    from src.select import select_topics
 
-    topics = select_placeholder(collect_all())
+    topics = select_topics(get_client())
     script_text, usage = generate_script(topics)
     print(f"--- Manuskript ({len(script_text.split())} Woerter, {usage}) ---\n")
     print(script_text)

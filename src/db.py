@@ -1,8 +1,7 @@
 """Supabase-Client und Abfragen fuer das Themen-Gedaechtnis (A5).
 
-Schema: supabase/schema.sql. Braucht SUPABASE_URL/SUPABASE_KEY in .env -
-bis das Projekt feststeht (siehe Chat), ist dieses Modul nicht lauffaehig,
-aber schon vollstaendig verdrahtet.
+Schema: supabase/schema.sql (+ Migration add_scoring_and_verification).
+Projekt: KI Podcast Agent (ylvpovjrloqpjypcfkya, eu-central-1).
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -25,17 +24,23 @@ def recent_topics(client: Client, days: int = 14) -> list[dict]:
     return res.data
 
 
-def insert_topic(client: Client, title: str, summary: str, source_urls: list[str],
-                  parent_topic_id: str | None = None, whats_new: str | None = None) -> dict:
-    row = {
-        "title": title,
-        "summary": summary,
-        "source_urls": source_urls,
-        "parent_topic_id": parent_topic_id,
-        "whats_new": whats_new,
-    }
-    res = client.table("topics").insert(row).execute()
+def insert_topic(client: Client, topic: dict) -> dict:
+    """Nimmt direkt das Ergebnis-Dict aus process.process_items()."""
+    res = client.table("topics").insert(topic).execute()
     return res.data[0]
+
+
+def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
+    """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
+    res = (
+        client.table("topics")
+        .select("*")
+        .eq("status", "candidate")
+        .order("total_score", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data
 
 
 def mark_topics_used(client: Client, topic_ids: list[str], episode_date: date) -> None:
