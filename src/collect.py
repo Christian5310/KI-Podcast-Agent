@@ -81,11 +81,22 @@ def collect_all(feeds: list[Feed] = FEEDS) -> list[RawItem]:
             all_items.extend(items)
         except Exception as exc:  # Fehler-Matrix: einzelne Quelle darf ausfallen
             print(f"[collect] WARNUNG {feed.name} nicht erreichbar: {exc}")
+
+    # Nicht-RSS-Quellen (lokaler Import gegen Zirkelimport, siehe scrape_ainauten.py)
+    from src.scrape_ainauten import fetch_ainauten
+
+    try:
+        items = fetch_ainauten()
+        print(f"[collect] AInauten: {len(items)} Eintraege")
+        all_items.extend(items)
+    except Exception as exc:
+        print(f"[collect] WARNUNG AInauten nicht erreichbar: {exc}")
+
     return all_items
 
 
 if __name__ == "__main__":
     results = collect_all()
-    print(f"\nGesamt: {len(results)} Rohnachrichten aus {len(FEEDS)} Quellen\n")
+    print(f"\nGesamt: {len(results)} Rohnachrichten aus {len(FEEDS)} RSS-Feeds + AInauten\n")
     for item in results[:5]:
         print(f"- [{item.source}] {item.title}\n  {item.url}")
