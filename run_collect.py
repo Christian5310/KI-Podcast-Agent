@@ -21,7 +21,9 @@ def main() -> None:
     print(f"{len(known)} bekannte Themen")
 
     print("\n=== Aufbereitung (Agent) + laufendes Speichern ===")
-    processed = process_items(raw_items, known, on_result=lambda t: insert_topic(client, t))
+    processed = process_items(
+        raw_items, known, on_result=lambda t: insert_topic(client, t), db_client=client
+    )
 
     print(f"\nFertig: {len(processed)} Themen gespeichert.")
 

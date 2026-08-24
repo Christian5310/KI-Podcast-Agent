@@ -24,7 +24,9 @@ def main() -> None:
         print(f"- [{t['total_score']}] {t['title']}")
 
     print("\n=== Manuskript + Faktencheck-Gate ===")
-    script_text, usage, factcheck_result = generate_with_factcheck(topics)
+    script_text, usage, factcheck_result = generate_with_factcheck(
+        topics, db_client=client, episode_date=episode_date
+    )
     print(f"{len(script_text.split())} Woerter, Faktencheck bestanden: {factcheck_result['passed']}")
 
     script_path = f"out/{episode_date.isoformat()}.md"
@@ -36,10 +38,12 @@ def main() -> None:
     print(f"Audio: {audio_path}")
 
     print("\n=== Ablegen & Themen als 'verwendet' markieren ===")
-    insert_episode(client, episode_date, script_text)
+    episode = insert_episode(client, episode_date, script_text)
     mark_topics_used(client, [t["id"] for t in topics], episode_date)
 
     print(f"\n=== Fertig: Folge vom {episode_date.isoformat()} ===")
+    print(f"Kosten Manuskript+Faktencheck: {episode['cost_eur']:.4f} EUR "
+          f"({episode['model_usage']}) - TTS-Kosten separat, noch nicht mitgezaehlt")
 
 
 if __name__ == "__main__":

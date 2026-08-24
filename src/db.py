@@ -30,6 +30,43 @@ def insert_topic(client: Client, topic: dict) -> dict:
     return res.data[0]
 
 
+def log_usage(client: Client, agent: str, model: str, input_tokens: int, output_tokens: int,
+              episode_date: date | None = None, note: str | None = None) -> None:
+    """Kriterium 6: jeder Modellaufruf wird mit Kosten protokolliert."""
+    from src.costs import estimate_cost_eur
+
+    client.table("usage_log").insert(
+        {
+            "agent": agent,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_eur": estimate_cost_eur(model, input_tokens, output_tokens),
+            "episode_date": episode_date.isoformat() if episode_date else None,
+            "note": note,
+        }
+    ).execute()
+
+
+def cost_summary(client: Client, since: date | None = None) -> list[dict]:
+    """Fuer die Kostenaussage am Mittwoch: Summe je Agent + Modell."""
+    query = client.table("usage_log").select("agent, model, input_tokens, output_tokens, cost_eur")
+    if since:
+        query = query.gte("created_at", since.isoformat())
+    rows = query.execute().data
+
+    summary: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        key = (r["agent"], r["model"])
+        entry = summary.setdefault(key, {"agent": r["agent"], "model": r["model"], "calls": 0,
+                                          "input_tokens": 0, "output_tokens": 0, "cost_eur": 0.0})
+        entry["calls"] += 1
+        entry["input_tokens"] += r["input_tokens"]
+        entry["output_tokens"] += r["output_tokens"]
+        entry["cost_eur"] += float(r["cost_eur"])
+    return sorted(summary.values(), key=lambda e: -e["cost_eur"])
+
+
 def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
     """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
     res = (
@@ -49,14 +86,34 @@ def mark_topics_used(client: Client, topic_ids: list[str], episode_date: date) -
     ).execute()
 
 
+def episode_cost(client: Client, episode_date: date) -> tuple[float, dict]:
+    """Summe + Aufschluesselung nach Agent fuer genau diese Folge (Manuskript+Faktencheck-
+    Anteil - der Aufbereitungs-Agent laeuft unabhaengig ueber den Tag, siehe Chat)."""
+    rows = (
+        client.table("usage_log")
+        .select("agent, model, input_tokens, output_tokens, cost_eur")
+        .eq("episode_date", episode_date.isoformat())
+        .execute()
+        .data
+    )
+    total = sum(float(r["cost_eur"]) for r in rows)
+    by_agent: dict[str, float] = {}
+    for r in rows:
+        by_agent[r["agent"]] = by_agent.get(r["agent"], 0.0) + float(r["cost_eur"])
+    return round(total, 6), by_agent
+
+
 def insert_episode(client: Client, episode_date: date, script_text: str, format_: str = "daily") -> dict:
+    cost_eur, by_agent = episode_cost(client, episode_date)
     row = {
         "episode_date": episode_date.isoformat(),
         "format": format_,
         "script_text": script_text,
         "word_count": len(script_text.split()),
+        "cost_eur": cost_eur,
+        "model_usage": by_agent,
     }
-    res = client.table("episodes").insert(row).execute()
+    res = client.table("episodes").upsert(row, on_conflict="episode_date").execute()
     return res.data[0]
 
 

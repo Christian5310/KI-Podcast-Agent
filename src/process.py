@@ -22,7 +22,7 @@ from src.collect import RawItem
 from src.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, EXA_API_KEY
 from src.llm_json import call_json
 
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-flash"  # deepseek-chat ist laut offizieller Doku abgekuendigt, siehe costs.py
 
 WEIGHTS = {"neuheit": 3, "handlungsbezug": 3, "quellenbreite": 2, "aktualitaet": 2}
 
@@ -69,15 +69,15 @@ def _client() -> OpenAI:
     return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
 
-def triage_item(client: OpenAI, item: RawItem, known_topics: list[dict]) -> dict:
+def triage_item(client: OpenAI, item: RawItem, known_topics: list[dict], db_client=None) -> dict:
     known_str = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(known_topics)) or "(keine)"
     prompt = TRIAGE_PROMPT.format(
         known_topics=known_str, title=item.title, source=item.source, summary=item.summary
     )
-    return call_json(client, MODEL, prompt)
+    return call_json(client, MODEL, prompt, agent="aufbereitung", db_client=db_client)
 
 
-def cross_check(client: OpenAI, claim: str) -> dict:
+def cross_check(client: OpenAI, claim: str, db_client=None) -> dict:
     """Sucht mit Exa nach der Kernbehauptung und laesst DeepSeek beurteilen, ob sie gedeckt ist."""
     if not EXA_API_KEY:
         return {"verified": None, "note": "Kein EXA_API_KEY - ungeprueft, nicht geraten"}
@@ -88,27 +88,33 @@ def cross_check(client: OpenAI, claim: str) -> dict:
     if not snippets:
         return {"verified": None, "note": "Keine Suchergebnisse gefunden"}
 
-    return call_json(client, MODEL, VERIFY_PROMPT.format(claim=claim, search_results=snippets))
+    return call_json(
+        client, MODEL, VERIFY_PROMPT.format(claim=claim, search_results=snippets),
+        agent="aufbereitung", db_client=db_client,
+    )
 
 
 def score_total(scores: dict) -> float:
     return sum(scores.get(k, 0) * w for k, w in WEIGHTS.items())
 
 
-def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=None) -> list[dict]:
+def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=None,
+                   db_client=None) -> list[dict]:
     """Verarbeitet alle Rohartikel, gibt Liste fertiger Themen-Datensaetze zurueck.
     Reine Wiederholungen werden herausgefiltert. on_result(dict) wird nach JEDEM
     Artikel aufgerufen (z.B. sofort in die DB schreiben) - damit bei einem Fehler
-    mittendrin nicht die bereits erledigte Arbeit verloren geht (Fehler-Matrix)."""
+    mittendrin nicht die bereits erledigte Arbeit verloren geht (Fehler-Matrix).
+    db_client (optional): wenn gesetzt, wird jeder Modellaufruf sofort mit Kosten
+    protokolliert (Kriterium 6, usage_log)."""
     client = _client()
     results = []
 
     for item in raw_items:
-        triage = triage_item(client, item, known_topics)
+        triage = triage_item(client, item, known_topics, db_client=db_client)
         if triage["schon_bekannt"] and not triage["ist_fortsetzung"]:
             continue  # reine Wiederholung, nichts Neues -> raus
 
-        verification = cross_check(client, triage["kernbehauptung"])
+        verification = cross_check(client, triage["kernbehauptung"], db_client=db_client)
 
         record = {
             "title": item.title,

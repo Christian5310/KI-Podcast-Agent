@@ -12,7 +12,13 @@ from openai import OpenAI
 MAX_JSON_RETRIES = 2
 
 
-def call_json(client: OpenAI, model: str, prompt: str, temperature: float = 0.3) -> dict:
+def call_json(
+    client: OpenAI, model: str, prompt: str, temperature: float = 0.3,
+    *, agent: str = "", db_client=None, episode_date=None,
+) -> dict:
+    """agent/db_client/episode_date optional: wenn db_client gesetzt ist, wird jeder
+    Aufruf (auch fehlgeschlagene JSON-Versuche - die kosten auch echtes Geld) sofort
+    in usage_log geschrieben (Kriterium 6)."""
     last_error = None
     for attempt in range(MAX_JSON_RETRIES + 1):
         resp = client.chat.completions.create(
@@ -21,6 +27,15 @@ def call_json(client: OpenAI, model: str, prompt: str, temperature: float = 0.3)
             response_format={"type": "json_object"},
             temperature=temperature,
         )
+        if db_client is not None:
+            from src.db import log_usage
+
+            log_usage(
+                db_client, agent, model,
+                resp.usage.prompt_tokens, resp.usage.completion_tokens,
+                episode_date=episode_date,
+            )
+
         raw = resp.choices[0].message.content
         try:
             return json.loads(raw)

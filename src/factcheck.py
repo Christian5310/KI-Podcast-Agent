@@ -15,7 +15,7 @@ from openai import OpenAI
 from src.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
 from src.llm_json import call_json
 
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-flash"  # deepseek-chat ist laut offizieller Doku abgekuendigt, siehe costs.py
 MAX_RETRIES = 2
 
 FACTCHECK_PROMPT = """Du prüfst ein Podcast-Manuskript gegen die Quellen. Suche NUR nach \
@@ -52,25 +52,35 @@ def _client() -> OpenAI:
     return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
 
-def check_script(script_text: str, topics: list[dict]) -> dict:
+def check_script(script_text: str, topics: list[dict], db_client=None, episode_date=None) -> dict:
     sources = "\n\n".join(
         f"- {t['title']}\n  {t['summary']}\n  Quelle(n): {', '.join(t.get('source_urls', []))}"
         for t in topics
     )
     prompt = FACTCHECK_PROMPT.format(sources=sources, script=script_text)
-    return call_json(_client(), MODEL, prompt)
+    return call_json(
+        _client(), MODEL, prompt, agent="faktencheck", db_client=db_client, episode_date=episode_date
+    )
 
 
-def generate_with_factcheck(topics: list[dict]) -> tuple[str, dict, dict]:
+def generate_with_factcheck(topics: list[dict], db_client=None, episode_date=None) -> tuple[str, dict, dict]:
     """B7: Manuskript erzeugen, gegenpruefen, bei Fehlschlag mit den gefundenen Problemen
-    neu schreiben lassen - bis MAX_RETRIES, danach Abbruch statt Senden (Fehler-Matrix)."""
+    neu schreiben lassen - bis MAX_RETRIES, danach Abbruch statt Senden (Fehler-Matrix).
+    db_client (optional): protokolliert Manuskript- UND Faktencheck-Kosten (Kriterium 6)."""
+    from src.script import MODEL as SCRIPT_MODEL
     from src.script import generate_script
 
     last_result = None
     previous_issues: list[str] | None = None
     for attempt in range(1, MAX_RETRIES + 2):
         script_text, usage = generate_script(topics, previous_issues)
-        result = check_script(script_text, topics)
+        if db_client is not None:
+            from src.db import log_usage
+
+            log_usage(db_client, "manuskript", SCRIPT_MODEL, usage["input_tokens"],
+                      usage["output_tokens"], episode_date=episode_date)
+
+        result = check_script(script_text, topics, db_client=db_client, episode_date=episode_date)
         print(f"[factcheck] Versuch {attempt}: passed={result['passed']}, "
               f"{len(result.get('issues', []))} Probleme")
 
