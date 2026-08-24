@@ -34,11 +34,13 @@ class Feed:
 
 
 # Startset Phase 1 (Thinnest Slice) - alle Feeds am 24.08.2026 live verifiziert (HTTP 200).
+# Zielgruppe laut Entscheidung 24.08.2026: KI-Alltagsuser (nicht KI-Manager/Mittelstand) -
+# daher VentureBeat (Enterprise) raus, The Verge (nutzerorientiert) rein.
 FEEDS: list[Feed] = [
     Feed("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/", "breit, international"),
-    Feed("VentureBeat AI", "https://venturebeat.com/category/ai/feed/", "Enterprise/Business-Blick"),
+    Feed("The Verge AI", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "sehr nutzerorientiert, Apps/Gadgets"),
     Feed("Ben's Bites", "https://www.bensbites.com/feed", "taeglicher, kompakter Ueberblick"),
-    Feed("One Useful Thing", "https://oneusefulthing.substack.com/feed", "angewandt, managementnah (Ethan Mollick)"),
+    Feed("One Useful Thing", "https://oneusefulthing.substack.com/feed", "angewandt, verstaendlich (Ethan Mollick)"),
 ]
 
 MANUSCRIPT_TARGET_WORDS = (1400, 1600)

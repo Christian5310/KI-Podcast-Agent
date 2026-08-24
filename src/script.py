@@ -1,11 +1,15 @@
 """Takt 2, Schritt 2: Manuskript erzeugen (Zwei-Stimmen-Dialog, ~1.400-1.600 Woerter).
 
-Der Prompt-Aufbau ist fertig, der eigentliche LLM-Call ist ein TODO -
-haengt von der Modell-Entscheidung (Claude/DeepSeek/Gemini) ab, siehe Chat.
-Sobald geklaert: generate_script() unten fertigstellen.
+Modell: Claude Sonnet ueber die Anthropic-API (Kap. 4: staerkstes Modell nur fuer
+die zwei Qualitaets-Schritte Manuskript + Faktencheck, nicht ueberall - Kriterium 6).
 """
 
+import anthropic
+
 from src.collect import RawItem
+from src.config import ANTHROPIC_API_KEY
+
+MODEL = "claude-sonnet-5"
 
 SYSTEM_PROMPT = """Du schreibst das Manuskript fuer einen taeglichen 10-Minuten \
 KI-News-Podcast mit zwei Stimmen im Dialog (Moderator A und Moderator B).
@@ -29,9 +33,33 @@ def build_user_prompt(topics: list[RawItem]) -> str:
     return "\n".join(lines)
 
 
-def generate_script(topics: list[RawItem]) -> str:
-    """TODO: an gewaehltes Modell anbinden, sobald API-Zugang geklaert ist."""
-    raise NotImplementedError(
-        "Modellwahl fuer Manuskript noch offen (Claude/DeepSeek/Gemini) - "
-        "siehe Chat. build_user_prompt() ist bereits einsatzbereit."
+def generate_script(topics: list[RawItem]) -> tuple[str, dict]:
+    """Erzeugt das Manuskript. Gibt (text, usage_info) zurueck - usage_info fuer
+    das Kosten-Logging (D1), auch wenn die DB-Anbindung dafuer erst Phase 3 kommt."""
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY fehlt in .env")
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": build_user_prompt(topics)}],
     )
+    text = "".join(block.text for block in response.content if block.type == "text")
+    usage = {
+        "model": MODEL,
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+    return text, usage
+
+
+if __name__ == "__main__":
+    from src.collect import collect_all
+    from src.select import select_placeholder
+
+    topics = select_placeholder(collect_all())
+    script_text, usage = generate_script(topics)
+    print(f"--- Manuskript ({len(script_text.split())} Woerter, {usage}) ---\n")
+    print(script_text)
