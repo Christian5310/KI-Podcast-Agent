@@ -42,7 +42,7 @@ def generate_script(topics: list[RawItem]) -> tuple[str, dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": build_user_prompt(topics)}],
     )

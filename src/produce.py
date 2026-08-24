@@ -1,14 +1,20 @@
 """Takt 2, Schritt 3: Produktion - Manuskript zu Audio (Zwei-Stimmen-TTS via ElevenLabs).
 
-Je Dialogzeile ein TTS-Call (Stimme A oder B), Segmente werden aneinandergehaengt.
+Aufbau je Folge: Musik-Sting -> Anmoderation ("Willkommen zum taeglichen KI Lab...")
+-> Dialog mit kurzen Pausen zwischen den Sprecherwechseln (Huberman-Lab-Referenz:
+ruhig, klar, kein Gehetze). Intro-Musik/-Stimme sind einmalig erzeugte, feste Assets
+(src/assets.py) - werden wiederverwendet statt taeglich neu generiert.
+
 Voice-IDs sind Platzhalter aus der ElevenLabs-Standardbibliothek - im ElevenLabs-
 Dashboard (Voice Library) pruefen/durch eigene Wahl ersetzen (siehe .env).
 """
 
+import io
 import os
 from pathlib import Path
 
 import requests
+from pydub import AudioSegment
 
 from src.config import ELEVENLABS_API_KEY
 
@@ -17,6 +23,10 @@ TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 VOICE_A = os.environ.get("ELEVENLABS_VOICE_A", "21m00Tcm4TlvDq8ikWAM")  # Platzhalter, in ElevenLabs pruefen
 VOICE_B = os.environ.get("ELEVENLABS_VOICE_B", "pNInz6obpgDQGcFmaJgB")  # Platzhalter, in ElevenLabs pruefen
+# Anmoderations-Stimme: maennlich, rau, "nicht zu nett" (Huberman-Lab-Referenz) - eigener Slot,
+# unabhaengig von den Dialog-Stimmen A/B. Placeholder faellt auf VOICE_B zurueck; im ElevenLabs
+# Voice-Library-Preview pruefen und via ELEVENLABS_VOICE_INTRO in .env durch eigene Wahl ersetzen.
+VOICE_INTRO = os.environ.get("ELEVENLABS_VOICE_INTRO", VOICE_B)
 
 
 def parse_dialogue(script_text: str) -> list[tuple[str, str]]:
@@ -46,21 +56,41 @@ def _tts_segment(text: str, voice_id: str) -> bytes:
     return resp.content
 
 
+def _mp3_bytes_to_segment(data: bytes) -> AudioSegment:
+    return AudioSegment.from_file(io.BytesIO(data), format="mp3")
+
+
 def produce_audio(script_text: str, episode_date: str) -> Path:
-    """Fuegt pro Dialogzeile ein TTS-Segment an, schreibt eine mp3 nach out/."""
+    """Baut Musik-Intro + Anmoderation + Dialog (mit Sprecherpausen) zu einer mp3 zusammen."""
+    from src.assets import ensure_intro_assets
+
     lines = parse_dialogue(script_text)
     if not lines:
         raise ValueError("Kein verwertbarer Dialog im Manuskript gefunden (Format 'A: ...' / 'B: ...' erwartet)")
 
+    music_path, voice_path = ensure_intro_assets()
+
+    music = AudioSegment.from_file(music_path, format="mp3")
+    voice = AudioSegment.from_file(voice_path, format="mp3")
+
+    # Stimme setzt bei Sekunde 2 ein, ueber der (kurzen, ausklingenden) Musik.
+    VOICE_START_MS = 2000
+    bed_length = max(len(music), VOICE_START_MS + len(voice))
+    intro = AudioSegment.silent(duration=bed_length)
+    intro = intro.overlay(music, position=0)
+    intro = intro.overlay(voice, position=VOICE_START_MS)
+
+    final = intro + AudioSegment.silent(duration=700)
+
+    for i, (speaker, text) in enumerate(lines, 1):
+        voice_id = VOICE_A if speaker == "A" else VOICE_B
+        segment = _mp3_bytes_to_segment(_tts_segment(text, voice_id))
+        final += segment + AudioSegment.silent(duration=350)
+        print(f"[produce] Segment {i}/{len(lines)} ({speaker}) geschrieben")
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{episode_date}.mp3"
-
-    with open(out_path, "wb") as f:
-        for i, (speaker, text) in enumerate(lines, 1):
-            voice_id = VOICE_A if speaker == "A" else VOICE_B
-            audio = _tts_segment(text, voice_id)
-            f.write(audio)
-            print(f"[produce] Segment {i}/{len(lines)} ({speaker}) geschrieben")
+    final.export(out_path, format="mp3")
 
     return out_path
 
