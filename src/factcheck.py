@@ -73,14 +73,23 @@ def generate_with_factcheck(topics: list[dict], db_client=None, episode_date=Non
     last_result = None
     previous_issues: list[str] | None = None
     for attempt in range(1, MAX_RETRIES + 2):
-        script_text, usage = generate_script(topics, previous_issues)
-        if db_client is not None:
-            from src.db import log_usage
+        try:
+            script_text, usage = generate_script(topics, previous_issues)
+            if db_client is not None:
+                from src.db import log_usage
 
-            log_usage(db_client, "manuskript", SCRIPT_MODEL, usage["input_tokens"],
-                      usage["output_tokens"], episode_date=episode_date)
+                log_usage(db_client, "manuskript", SCRIPT_MODEL, usage["input_tokens"],
+                          usage["output_tokens"], episode_date=episode_date)
 
-        result = check_script(script_text, topics, db_client=db_client, episode_date=episode_date)
+            result = check_script(script_text, topics, db_client=db_client, episode_date=episode_date)
+        except Exception as exc:
+            # API-Fehler zaehlen wie ein nicht bestandener Faktencheck - gleicher
+            # Retry-Zaehler, gleicher klarer Abbruch statt undurchsichtigem Crash.
+            print(f"[factcheck] Versuch {attempt} mit Fehler abgebrochen: {exc}")
+            last_result = {"passed": False, "issues": [f"Technischer Fehler: {exc}"]}
+            previous_issues = None
+            continue
+
         print(f"[factcheck] Versuch {attempt}: passed={result['passed']}, "
               f"{len(result.get('issues', []))} Probleme")
 
