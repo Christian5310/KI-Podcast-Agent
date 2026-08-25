@@ -67,6 +67,36 @@ def cost_summary(client: Client, since: date | None = None) -> list[dict]:
     return sorted(summary.values(), key=lambda e: -e["cost_eur"])
 
 
+def upload_audio(client: Client, local_path, episode_date: date) -> str:
+    """C2/C3: Audiodatei oeffentlich erreichbar ablegen (Supabase Storage, public bucket).
+    Gibt die stabile oeffentliche URL zurueck."""
+    object_path = f"{episode_date.isoformat()}.mp3"
+    with open(local_path, "rb") as f:
+        client.storage.from_("audio").upload(
+            object_path, f, {"content-type": "audio/mpeg", "upsert": "true"}
+        )
+    return client.storage.from_("audio").get_public_url(object_path)
+
+
+def all_episodes(client: Client, limit: int = 60) -> list[dict]:
+    """Fuer die Zustellung (C3): alle Folgen, neueste zuerst."""
+    res = (
+        client.table("episodes")
+        .select("episode_date, format, audio_url, word_count, topic_ids")
+        .order("episode_date", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data
+
+
+def episode_topics(client: Client, topic_ids: list[str]) -> list[dict]:
+    if not topic_ids:
+        return []
+    res = client.table("topics").select("title, source_urls").in_("id", topic_ids).execute()
+    return res.data
+
+
 def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
     """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
     res = (
@@ -103,7 +133,8 @@ def episode_cost(client: Client, episode_date: date) -> tuple[float, dict]:
     return round(total, 6), by_agent
 
 
-def insert_episode(client: Client, episode_date: date, script_text: str, format_: str = "daily") -> dict:
+def insert_episode(client: Client, episode_date: date, script_text: str, format_: str = "daily",
+                    audio_url: str | None = None, topic_ids: list[str] | None = None) -> dict:
     cost_eur, by_agent = episode_cost(client, episode_date)
     row = {
         "episode_date": episode_date.isoformat(),
@@ -112,6 +143,8 @@ def insert_episode(client: Client, episode_date: date, script_text: str, format_
         "word_count": len(script_text.split()),
         "cost_eur": cost_eur,
         "model_usage": by_agent,
+        "audio_url": audio_url,
+        "topic_ids": topic_ids,
     }
     res = client.table("episodes").upsert(row, on_conflict="episode_date").execute()
     return res.data[0]

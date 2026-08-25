@@ -1,0 +1,67 @@
+name: Takt 2 - Morgenlauf
+
+# Zeitkritisch: muss vor 8:00 Uhr lokal fertig sein. UTC-Falle beachtet (siehe
+# Strategie-Doku Kap. 5): 04:00 UTC = 06:00 MESZ (Sommerzeit) - ~2h Puffer vor
+# der 8-Uhr-Deadline. Nach der Zeitumstellung im Oktober (MEZ) auf 05:00 UTC
+# umstellen, sonst verschiebt sich die gefuehlte Sendezeit um eine Stunde.
+on:
+  schedule:
+    - cron: "0 4 * * 1-5"  # Mo-Fr (Sendetage)
+  workflow_dispatch:
+    inputs:
+      backfill_date:
+        description: "Nachtraeglich fuer ein Datum erzeugen (YYYY-MM-DD, leer = heute)"
+        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  morning:
+    runs-on: ubuntu-latest
+    # C4: harte Deadline. Laeuft der Job laenger, bricht GitHub Actions ab, BEVOR
+    # der Zustellungs-Schritt (letzter Schritt in run_morning.py) erreicht wird -
+    # site/ bleibt unveraendert, die Vortagesfolge bleibt online (Fehler-Matrix).
+    timeout-minutes: 110
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r requirements.txt
+      - name: Morgenlauf ausfuehren
+        run: |
+          if [ -n "${{ github.event.inputs.backfill_date }}" ]; then
+            python run_morning.py --date "${{ github.event.inputs.backfill_date }}"
+          else
+            python run_morning.py
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_A: ${{ secrets.ELEVENLABS_VOICE_A }}
+          ELEVENLABS_VOICE_B: ${{ secrets.ELEVENLABS_VOICE_B }}
+          ELEVENLABS_VOICE_INTRO: ${{ secrets.ELEVENLABS_VOICE_INTRO }}
+      - name: Assets committen (einmalig erzeugte Intro-Musik/-Stimme)
+        run: |
+          git config user.name "podcast-bot"
+          git config user.email "actions@github.com"
+          git add assets/ || true
+          git diff --cached --quiet || git commit -m "Intro-Assets aktualisiert [skip ci]"
+          git push || true
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+      - id: deployment
+        uses: actions/deploy-pages@v4
