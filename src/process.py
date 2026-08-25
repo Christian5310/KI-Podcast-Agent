@@ -75,7 +75,9 @@ Suchergebnisse:
 def _client() -> OpenAI:
     if not DEEPSEEK_API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY fehlt in .env")
-    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    # Timeout gesetzt, damit ein einzelner haengender Call nicht den ganzen Lauf blockiert -
+    # call_json() versucht es danach automatisch erneut (Fehler-Matrix).
+    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL, timeout=30.0, max_retries=1)
 
 
 def _age_str(item: RawItem) -> str:

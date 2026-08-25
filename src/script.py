@@ -50,7 +50,7 @@ def generate_script(topics: list[dict], previous_issues: list[str] | None = None
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY fehlt in .env")
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0, max_retries=1)
     response = client.messages.create(
         model=MODEL,
         max_tokens=8192,

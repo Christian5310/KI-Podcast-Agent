@@ -49,7 +49,7 @@ Manuskript:
 def _client() -> OpenAI:
     if not DEEPSEEK_API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY fehlt in .env")
-    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL, timeout=30.0, max_retries=1)
 
 
 def check_script(script_text: str, topics: list[dict], db_client=None, episode_date=None) -> dict:
