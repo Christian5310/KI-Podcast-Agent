@@ -15,6 +15,7 @@ Neuheit x3, Handlungsbezug x3 (Alltagsuser-Aequivalent zu "Mittelstandsrelevanz"
 Quellenbreite x2, Aktualitaet x2. Max. 100 Punkte.
 """
 
+import threading
 from datetime import datetime, timezone
 
 from exa_py import Exa
@@ -117,6 +118,66 @@ def score_total(scores: dict) -> float:
     return sum(scores.get(k, 0) * w for k, w in WEIGHTS.items())
 
 
+ITEM_TIMEOUT_SECONDS = 45
+
+
+def _process_one(client: OpenAI, item: RawItem, known_topics: list[dict], db_client) -> dict | None:
+    """Ein Rohartikel: Triage + ggf. Cross-Check. None = reine Wiederholung, raus."""
+    triage = triage_item(client, item, known_topics, db_client=db_client)
+    if triage.get("schon_bekannt") and not triage.get("ist_fortsetzung"):
+        return None
+
+    claim = triage.get("kernbehauptung")
+    if claim:
+        verification = cross_check(client, claim, db_client=db_client)
+    else:
+        verification = {"verified": None, "note": "Keine pruefbare Kernbehauptung vom Agenten geliefert"}
+
+    idx = triage.get("passendes_thema_index")
+    parent_id = known_topics[idx]["id"] if isinstance(idx, int) and 0 <= idx < len(known_topics) else None
+    scores = triage.get("scores") or {}
+
+    return {
+        "title": item.title,
+        "summary": item.summary,
+        "source_urls": [item.url],
+        "parent_topic_id": parent_id,
+        "whats_new": triage.get("was_ist_neu"),
+        "themenblock": triage.get("themenblock"),
+        "scores": scores,
+        "total_score": score_total(scores),
+        "verified": verification["verified"],
+        "verification_note": verification["note"],
+    }
+
+
+def _process_one_with_timeout(client: OpenAI, item: RawItem, known_topics: list[dict], db_client) -> dict | None:
+    """Haertester Schutz: weder die DeepSeek- noch die Exa-Bibliothek erlauben ein
+    zuverlaessiges Timeout (Exa hat gar keinen Parameter dafuer). Deshalb laeuft die
+    Verarbeitung in einem Daemon-Thread - haengt ein Call, geben wir nach
+    ITEM_TIMEOUT_SECONDS auf und machen mit dem naechsten Artikel weiter, statt den
+    ganzen Lauf zu blockieren. Der haengende Thread stirbt spaetestens mit dem Prozess."""
+    box: dict = {}
+
+    def target():
+        try:
+            box["result"] = _process_one(client, item, known_topics, db_client)
+        except Exception as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(ITEM_TIMEOUT_SECONDS)
+
+    if thread.is_alive():
+        print(f"[process] TIMEOUT nach {ITEM_TIMEOUT_SECONDS}s bei {item.title[:60]!r} - uebersprungen")
+        return None
+    if "error" in box:
+        print(f"[process] FEHLER bei {item.title[:60]!r}: {box['error']} - uebersprungen")
+        return None
+    return box.get("result")
+
+
 def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=None,
                    db_client=None) -> list[dict]:
     """Verarbeitet alle Rohartikel, gibt Liste fertiger Themen-Datensaetze zurueck.
@@ -136,35 +197,13 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
                 skipped_old += 1
                 continue  # Entscheidung 24.08.2026: aelter als 72h kommt gar nicht erst rein
 
-        triage = triage_item(client, item, known_topics, db_client=db_client)
-        if triage.get("schon_bekannt") and not triage.get("ist_fortsetzung"):
-            continue  # reine Wiederholung, nichts Neues -> raus
+        record = _process_one_with_timeout(client, item, known_topics, db_client)
+        if record is None:
+            continue
 
-        claim = triage.get("kernbehauptung")
-        if claim:
-            verification = cross_check(client, claim, db_client=db_client)
-        else:
-            verification = {"verified": None, "note": "Keine pruefbare Kernbehauptung vom Agenten geliefert"}
-
-        idx = triage.get("passendes_thema_index")
-        parent_id = known_topics[idx]["id"] if isinstance(idx, int) and 0 <= idx < len(known_topics) else None
-        scores = triage.get("scores") or {}
-
-        record = {
-            "title": item.title,
-            "summary": item.summary,
-            "source_urls": [item.url],
-            "parent_topic_id": parent_id,
-            "whats_new": triage.get("was_ist_neu"),
-            "themenblock": triage.get("themenblock"),
-            "scores": scores,
-            "total_score": score_total(scores),
-            "verified": verification["verified"],
-            "verification_note": verification["note"],
-        }
         results.append(record)
         print(f"[process] {item.title[:60]!r} -> score={record['total_score']:.0f}, "
-              f"verified={verification['verified']}")
+              f"verified={record['verified']}")
 
         if on_result:
             on_result(record)
