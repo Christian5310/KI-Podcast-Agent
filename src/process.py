@@ -178,17 +178,24 @@ def _process_one_with_timeout(client: OpenAI, item: RawItem, known_topics: list[
     return box.get("result")
 
 
+MAX_WORKERS = 8  # parallele Artikel gleichzeitig - sequentiell haette ~180 Artikel weit
+                 # ueber eine Stunde gebraucht (in der CI beobachtet, 24.08.2026)
+
+
 def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=None,
                    db_client=None) -> list[dict]:
-    """Verarbeitet alle Rohartikel, gibt Liste fertiger Themen-Datensaetze zurueck.
-    Reine Wiederholungen werden herausgefiltert. on_result(dict) wird nach JEDEM
-    Artikel aufgerufen (z.B. sofort in die DB schreiben) - damit bei einem Fehler
-    mittendrin nicht die bereits erledigte Arbeit verloren geht (Fehler-Matrix).
-    db_client (optional): wenn gesetzt, wird jeder Modellaufruf sofort mit Kosten
-    protokolliert (Kriterium 6, usage_log)."""
+    """Verarbeitet alle Rohartikel PARALLEL (Thread-Pool, siehe MAX_WORKERS), gibt Liste
+    fertiger Themen-Datensaetze zurueck. Reine Wiederholungen werden herausgefiltert.
+    on_result(dict) wird nach JEDEM fertigen Artikel aufgerufen (z.B. sofort in die DB
+    schreiben) - damit bei einem Fehler mittendrin nicht die bereits erledigte Arbeit
+    verloren geht (Fehler-Matrix). db_client (optional): wenn gesetzt, wird jeder
+    Modellaufruf sofort mit Kosten protokolliert (Kriterium 6, usage_log)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     client = _client()
     results = []
     skipped_old = 0
+    to_process = []
 
     for item in raw_items:
         if item.published:
@@ -196,17 +203,28 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
             if age_hours > MAX_AGE_HOURS:
                 skipped_old += 1
                 continue  # Entscheidung 24.08.2026: aelter als 72h kommt gar nicht erst rein
+        to_process.append(item)
 
-        record = _process_one_with_timeout(client, item, known_topics, db_client)
-        if record is None:
-            continue
+    print(f"[process] {len(to_process)} Artikel werden mit {MAX_WORKERS} parallelen "
+          f"Workern verarbeitet...")
 
-        results.append(record)
-        print(f"[process] {item.title[:60]!r} -> score={record['total_score']:.0f}, "
-              f"verified={record['verified']}")
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        future_to_item = {
+            pool.submit(_process_one_with_timeout, client, item, known_topics, db_client): item
+            for item in to_process
+        }
+        for future in as_completed(future_to_item):
+            item = future_to_item[future]
+            record = future.result()  # _process_one_with_timeout faengt selbst alle Fehler ab
+            if record is None:
+                continue
 
-        if on_result:
-            on_result(record)
+            results.append(record)
+            print(f"[process] {item.title[:60]!r} -> score={record['total_score']:.0f}, "
+                  f"verified={record['verified']}")
+
+            if on_result:
+                on_result(record)
 
     if skipped_old:
         print(f"[process] {skipped_old} Rohartikel wegen Alter (>{MAX_AGE_HOURS}h) uebersprungen, "
