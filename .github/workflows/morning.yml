@@ -25,6 +25,8 @@ jobs:
     # der Zustellungs-Schritt (letzter Schritt in run_morning.py) erreicht wird -
     # site/ bleibt unveraendert, die Vortagesfolge bleibt online (Fehler-Matrix).
     timeout-minutes: 110
+    env:
+      PYTHONUNBUFFERED: "1"  # sonst erscheinen print()-Ausgaben erst ganz am Ende im Log
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
