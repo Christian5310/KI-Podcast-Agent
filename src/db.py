@@ -97,6 +97,32 @@ def episode_topics(client: Client, topic_ids: list[str]) -> list[dict]:
     return res.data
 
 
+def week_block_counts(client: Client) -> dict[str, int]:
+    """Fuer die Themenblock-Regel (Entscheidungstabelle Punkt 1): wie oft kam welcher
+    Themenblock diese Woche (Mo-heute) schon in einer Folge vor."""
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+
+    episodes = (
+        client.table("episodes")
+        .select("topic_ids")
+        .gte("episode_date", monday.isoformat())
+        .execute()
+        .data
+    )
+    all_topic_ids = [tid for ep in episodes for tid in (ep.get("topic_ids") or [])]
+    if not all_topic_ids:
+        return {}
+
+    topics = client.table("topics").select("themenblock").in_("id", all_topic_ids).execute().data
+    counts: dict[str, int] = {}
+    for t in topics:
+        block = t.get("themenblock")
+        if block:
+            counts[block] = counts.get(block, 0) + 1
+    return counts
+
+
 def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
     """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
     res = (

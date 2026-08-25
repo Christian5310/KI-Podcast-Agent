@@ -54,6 +54,12 @@ FEEDS: list[Feed] = [
     Feed("Simon Willison", "https://simonwillison.net/atom/everything/", "'ich hab's ausprobiert', praxisnah"),
     Feed("404 Media", "https://www.404media.co/rss/", "investigativ, gegen Langeweile/Wiederholung"),
     Feed("Hacker News", "https://news.ycombinator.com/rss", "Pulsmesser, Community-Diskussion"),
+    # Entscheidung 24.08.2026: Reddit dazugenommen. Achtung: Reddit rate-limitet recht
+    # aggressiv (429 bei zu dichten Anfragen, insb. von Cloud-IPs wie GitHub Actions) -
+    # kein garantierter Treffer, aber durch die Fehler-Matrix in collect.py unkritisch,
+    # wenn's mal ausfaellt.
+    Feed("Reddit r/artificial", "https://www.reddit.com/r/artificial/.rss", "was bewegt echte Nutzer"),
+    Feed("Reddit r/ChatGPT", "https://www.reddit.com/r/ChatGPT/.rss", "was bewegt echte Nutzer"),
 ]
 
 MANUSCRIPT_TARGET_WORDS = (1400, 1600)

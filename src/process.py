@@ -15,6 +15,8 @@ Neuheit x3, Handlungsbezug x3 (Alltagsuser-Aequivalent zu "Mittelstandsrelevanz"
 Quellenbreite x2, Aktualitaet x2. Max. 100 Punkte.
 """
 
+from datetime import datetime, timezone
+
 from exa_py import Exa
 from openai import OpenAI
 
@@ -25,6 +27,9 @@ from src.llm_json import call_json
 MODEL = "deepseek-v4-flash"  # deepseek-chat ist laut offizieller Doku abgekuendigt, siehe costs.py
 
 WEIGHTS = {"neuheit": 3, "handlungsbezug": 3, "quellenbreite": 2, "aktualitaet": 2}
+
+# Entscheidung 24.08.2026 (Entscheidungstabelle Quellenbewertung, Punkt 3): max. 72h.
+MAX_AGE_HOURS = 72
 
 TRIAGE_PROMPT = """Du bewertest eine KI-News-Rohmeldung fuer einen taeglichen KI-Podcast \
 fuer KI-Alltagsuser (nicht zu technisch, nicht zu einschlaegig, nutzerorientiert - \
@@ -39,10 +44,13 @@ kein Fliesstext davor/danach:
   "passendes_thema_index": <int oder null>,
   "was_ist_neu": "<string oder null>",
   "kernbehauptung": "<die zentrale pruefbare Tatsache: Zahl, Name oder Fakt>",
+  "themenblock": "<einer von: Neue Modelle & Releases | Tools & Alltag | Kosten & Zugang | Gesellschaft & Kontroversen | Forschung & Ausblick | Unternehmen & Markt>",
   "scores": {{"neuheit": <0-10>, "quellenbreite": <0-10>, "aktualitaet": <0-10>, "handlungsbezug": <0-10>}}
 }}
 
 schon_bekannt=true UND ist_fortsetzung=false bedeutet: reine Wiederholung, nichts Neues -> neuheit=0.
+Fuer "aktualitaet": nutze das Alter unten direkt (0-6h -> 9-10, 6-24h -> 6-8, 24-48h -> 3-5,
+48-72h -> 0-2), nicht die reine Textwirkung schaetzen.
 
 Bekannte Themen der letzten 14 Tage:
 {known_topics}
@@ -50,6 +58,7 @@ Bekannte Themen der letzten 14 Tage:
 Neue Rohmeldung:
 Titel: {title}
 Quelle: {source}
+Alter: {age}
 Zusammenfassung: {summary}
 """
 
@@ -69,10 +78,18 @@ def _client() -> OpenAI:
     return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
 
+def _age_str(item: RawItem) -> str:
+    if not item.published:
+        return "unbekannt (vorsichtig/niedrig bewerten)"
+    hours = (datetime.now(timezone.utc) - item.published).total_seconds() / 3600
+    return f"{hours:.0f} Stunden alt"
+
+
 def triage_item(client: OpenAI, item: RawItem, known_topics: list[dict], db_client=None) -> dict:
     known_str = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(known_topics)) or "(keine)"
     prompt = TRIAGE_PROMPT.format(
-        known_topics=known_str, title=item.title, source=item.source, summary=item.summary
+        known_topics=known_str, title=item.title, source=item.source,
+        age=_age_str(item), summary=item.summary,
     )
     return call_json(client, MODEL, prompt, agent="aufbereitung", db_client=db_client)
 
@@ -83,7 +100,7 @@ def cross_check(client: OpenAI, claim: str, db_client=None) -> dict:
         return {"verified": None, "note": "Kein EXA_API_KEY - ungeprueft, nicht geraten"}
 
     exa = Exa(api_key=EXA_API_KEY)
-    results = exa.search_and_contents(claim, num_results=3, text=True)
+    results = exa.search(claim, num_results=3, text=True)
     snippets = "\n\n".join(f"- {r.title} ({r.url})\n  {(r.text or '')[:400]}" for r in results.results)
     if not snippets:
         return {"verified": None, "note": "Keine Suchergebnisse gefunden"}
@@ -108,8 +125,15 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
     protokolliert (Kriterium 6, usage_log)."""
     client = _client()
     results = []
+    skipped_old = 0
 
     for item in raw_items:
+        if item.published:
+            age_hours = (datetime.now(timezone.utc) - item.published).total_seconds() / 3600
+            if age_hours > MAX_AGE_HOURS:
+                skipped_old += 1
+                continue  # Entscheidung 24.08.2026: aelter als 72h kommt gar nicht erst rein
+
         triage = triage_item(client, item, known_topics, db_client=db_client)
         if triage["schon_bekannt"] and not triage["ist_fortsetzung"]:
             continue  # reine Wiederholung, nichts Neues -> raus
@@ -126,6 +150,7 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
                 else None
             ),
             "whats_new": triage.get("was_ist_neu"),
+            "themenblock": triage.get("themenblock"),
             "scores": triage["scores"],
             "total_score": score_total(triage["scores"]),
             "verified": verification["verified"],
@@ -137,6 +162,10 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
 
         if on_result:
             on_result(record)
+
+    if skipped_old:
+        print(f"[process] {skipped_old} Rohartikel wegen Alter (>{MAX_AGE_HOURS}h) uebersprungen, "
+              f"kein Agent-Aufruf noetig")
 
     return results
 

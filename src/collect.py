@@ -56,8 +56,13 @@ def _parse_published(entry) -> datetime | None:
     return None
 
 
+_USER_AGENT = "ki-lab-podcast-agent/1.0 (taeglicher KI-News-Podcast; +https://github.com/Christian5310/KI-Podcast-Agent)"
+
+
 def fetch_feed(feed: Feed) -> list[RawItem]:
-    parsed = feedparser.parse(feed.url)
+    # Eigener User-Agent statt feedparser-Default - manche Quellen (v.a. Reddit)
+    # blocken/rate-limiten generische Bot-User-Agents haerter.
+    parsed = feedparser.parse(feed.url, agent=_USER_AGENT)
     items = []
     for entry in parsed.entries:
         items.append(
