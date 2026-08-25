@@ -63,10 +63,12 @@ def check_script(script_text: str, topics: list[dict], db_client=None, episode_d
     )
 
 
-def generate_with_factcheck(topics: list[dict], db_client=None, episode_date=None) -> tuple[str, dict, dict]:
+def generate_with_factcheck(topics: list[dict], db_client=None, episode_date=None,
+                             format_: str = "daily", week_context: str | None = None) -> tuple[str, dict, dict]:
     """B7: Manuskript erzeugen, gegenpruefen, bei Fehlschlag mit den gefundenen Problemen
     neu schreiben lassen - bis MAX_RETRIES, danach Abbruch statt Senden (Fehler-Matrix).
-    db_client (optional): protokolliert Manuskript- UND Faktencheck-Kosten (Kriterium 6)."""
+    db_client (optional): protokolliert Manuskript- UND Faktencheck-Kosten (Kriterium 6).
+    format_/week_context: B4/B5 Sonderformate (Montag-Rueckblick/Freitag-Ueberblick)."""
     from src.script import MODEL as SCRIPT_MODEL
     from src.script import generate_script
 
@@ -74,7 +76,7 @@ def generate_with_factcheck(topics: list[dict], db_client=None, episode_date=Non
     previous_issues: list[str] | None = None
     for attempt in range(1, MAX_RETRIES + 2):
         try:
-            script_text, usage = generate_script(topics, previous_issues)
+            script_text, usage = generate_script(topics, previous_issues, format_, week_context)
             if db_client is not None:
                 from src.db import log_usage
 

@@ -10,9 +10,7 @@ from src.config import ANTHROPIC_API_KEY
 
 MODEL = "claude-sonnet-5"
 
-SYSTEM_PROMPT = """Du schreibst das Manuskript fuer einen taeglichen 10-Minuten \
-KI-News-Podcast mit zwei Stimmen im Dialog.
-
+_BASE_RULES = """
 Feste Rollen (in jeder Folge gleich, sorgt fuer wiedererkennbare Chemie statt \
 zweier austauschbarer Stimmen):
 - A: neugierig, schnell begeistert, stellt gern die "was macht das mit mir"-Frage.
@@ -47,9 +45,37 @@ Regeln:
 - Ende: kurzer, nicht formelhafter Abschluss.
 """
 
+SYSTEM_PROMPT_DAILY = "Du schreibst das Manuskript fuer einen taeglichen 10-Minuten " \
+    "KI-News-Podcast mit zwei Stimmen im Dialog.\n" + _BASE_RULES
 
-def build_user_prompt(topics: list[dict], previous_issues: list[str] | None = None) -> str:
-    lines = ["Die heutigen Themen (Titel, Kurzfassung, Quellen, ggf. Fortsetzungshinweis):\n"]
+SYSTEM_PROMPT_MONDAY = (
+    "Du schreibst das Manuskript fuer die MONTAGS-Ausgabe eines 10-Minuten "
+    "KI-News-Podcasts mit zwei Stimmen im Dialog. Besonderheit: heute ist "
+    "Wochenend-Rueckblick - die Themen unten koennen vom Freitagabend, Samstag oder "
+    "Sonntag stammen (noch niemand hat sie in dieser Folge gehoert). Rahmen es explizit "
+    "als 'was am Wochenende passiert ist', z.B. am Anfang kurz einordnen, dass es um "
+    "die letzten paar Tage geht, nicht nur 'gestern'.\n" + _BASE_RULES
+)
+
+SYSTEM_PROMPT_FRIDAY = (
+    "Du schreibst das Manuskript fuer die FREITAGS-Ausgabe eines 10-Minuten "
+    "KI-News-Podcasts mit zwei Stimmen im Dialog. Besonderheit: heute ist "
+    "Wochenueberblick. Du bekommst eine Liste der Themen, die diese Woche (Mo-Do) "
+    "schon in der Folge waren. NICHT die einzelnen Meldungen nochmal aufzaehlen oder "
+    "wiederholen - stattdessen die LINIE der Woche zeigen: was hat sich entwickelt, "
+    "welches Muster zieht sich durch, was war der grosse Bogen. Ordne ein, nicht "
+    "nacherzaehlen. Ergaenze gern 1-2 wirklich neue, aktuelle Themen vom heutigen Tag, "
+    "falls welche dabei sind.\n" + _BASE_RULES
+)
+
+
+def build_user_prompt(topics: list[dict], previous_issues: list[str] | None = None,
+                       week_context: str | None = None) -> str:
+    lines = []
+    if week_context:
+        lines.append(f"Themen dieser Woche bisher (Mo-Do, zur Einordnung, NICHT nacherzaehlen):\n{week_context}\n")
+
+    lines.append("Die heutigen Themen (Titel, Kurzfassung, Quellen, ggf. Fortsetzungshinweis):\n")
     for i, t in enumerate(topics, 1):
         sources = ", ".join(t.get("source_urls", []))
         entry = f"{i}. {t['title']}\n   {t['summary']}\n   Quelle(n): {sources}"
@@ -67,11 +93,21 @@ def build_user_prompt(topics: list[dict], previous_issues: list[str] | None = No
     return "\n".join(lines)
 
 
-def generate_script(topics: list[dict], previous_issues: list[str] | None = None) -> tuple[str, dict]:
+_FORMAT_PROMPTS = {
+    "daily": SYSTEM_PROMPT_DAILY,
+    "monday_recap": SYSTEM_PROMPT_MONDAY,
+    "friday_overview": SYSTEM_PROMPT_FRIDAY,
+}
+
+
+def generate_script(topics: list[dict], previous_issues: list[str] | None = None,
+                     format_: str = "daily", week_context: str | None = None) -> tuple[str, dict]:
     """Erzeugt das Manuskript. Gibt (text, usage_info) zurueck - usage_info fuer
-    das Kosten-Logging (D1), auch wenn die DB-Anbindung dafuer erst Phase 3 kommt."""
+    das Kosten-Logging (D1). format_: 'daily' | 'monday_recap' | 'friday_overview' (B4/B5)."""
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY fehlt in .env")
+
+    system_prompt = _FORMAT_PROMPTS.get(format_, SYSTEM_PROMPT_DAILY)
 
     # Timeout grosszuegig (eine volle 1.500-Woerter-Antwort braucht teils >60s), plus
     # eigene Retries obendrauf - ein einzelner Verbindungsfehler soll nicht den ganzen
@@ -84,8 +120,8 @@ def generate_script(topics: list[dict], previous_issues: list[str] | None = None
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=8192,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": build_user_prompt(topics, previous_issues)}],
+                system=system_prompt,
+                messages=[{"role": "user", "content": build_user_prompt(topics, previous_issues, week_context)}],
             )
             break
         except anthropic.APIConnectionError as exc:

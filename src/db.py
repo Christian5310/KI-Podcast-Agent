@@ -123,6 +123,38 @@ def week_block_counts(client: Client) -> dict[str, int]:
     return counts
 
 
+def week_topics_summary(client: Client, before: date) -> str:
+    """B5 (Freitag-Sonderformat): Themen dieser Woche (Mo bis vor 'before'), formatiert
+    fuer den Wochenueberblick-Prompt - der soll NICHT nacherzaehlen, sondern einordnen."""
+    monday = before - timedelta(days=before.weekday())
+    episodes = (
+        client.table("episodes")
+        .select("episode_date, topic_ids")
+        .gte("episode_date", monday.isoformat())
+        .lt("episode_date", before.isoformat())
+        .order("episode_date")
+        .execute()
+        .data
+    )
+    if not episodes:
+        return ""
+
+    lines = []
+    for ep in episodes:
+        topic_ids = ep.get("topic_ids") or []
+        if not topic_ids:
+            continue
+        topics = client.table("topics").select("title, whats_new").in_("id", topic_ids).execute().data
+        d = datetime.fromisoformat(ep["episode_date"]).strftime("%A, %d.%m.")
+        lines.append(f"{d}:")
+        for t in topics:
+            entry = f"  - {t['title']}"
+            if t.get("whats_new"):
+                entry += f" (Update: {t['whats_new']})"
+            lines.append(entry)
+    return "\n".join(lines)
+
+
 def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
     """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
     res = (
