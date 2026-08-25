@@ -155,6 +155,44 @@ def week_topics_summary(client: Client, before: date) -> str:
     return "\n".join(lines)
 
 
+def repetition_metric(client: Client, n_episodes: int = 7) -> dict:
+    """D7: leichtgewichtige Kennzahl fuer den Kriterium-2/3-Nachweis am Mittwoch - wie
+    stark ueberschneiden sich die Themen-Titel benachbarter Folgen (Jaccard auf
+    Woertern). Niedrig = echte Themenvielfalt statt Wiederholung. Kein Anspruch auf
+    Praezision, nur ein schneller, nachvollziehbarer Beleg."""
+    import re
+
+    episodes = (
+        client.table("episodes")
+        .select("episode_date, topic_ids")
+        .order("episode_date", desc=True)
+        .limit(n_episodes)
+        .execute()
+        .data
+    )
+
+    per_episode = []
+    for ep in episodes:
+        topic_ids = ep.get("topic_ids") or []
+        if not topic_ids:
+            continue
+        topics = client.table("topics").select("title").in_("id", topic_ids).execute().data
+        words = set(re.findall(r"\w+", " ".join(t["title"] for t in topics).lower()))
+        per_episode.append((ep["episode_date"], words))
+
+    pairs = []
+    for i in range(len(per_episode) - 1):
+        date_a, words_a = per_episode[i]
+        date_b, words_b = per_episode[i + 1]
+        if not words_a or not words_b:
+            continue
+        overlap = len(words_a & words_b) / len(words_a | words_b)
+        pairs.append({"from": date_b, "to": date_a, "overlap": round(overlap, 3)})
+
+    avg = round(sum(p["overlap"] for p in pairs) / len(pairs), 3) if pairs else 0.0
+    return {"episodes_compared": len(per_episode), "avg_overlap": avg, "pairs": pairs}
+
+
 def candidate_topics(client: Client, limit: int = 30) -> list[dict]:
     """Fuer die Auswahl (select.py): unverbrauchte Themen, nach Score sortiert."""
     res = (
