@@ -73,13 +73,27 @@ def generate_script(topics: list[dict], previous_issues: list[str] | None = None
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY fehlt in .env")
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0, max_retries=1)
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=8192,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_user_prompt(topics, previous_issues)}],
-    )
+    # Timeout grosszuegig (eine volle 1.500-Woerter-Antwort braucht teils >60s), plus
+    # eigene Retries obendrauf - ein einzelner Verbindungsfehler soll nicht den ganzen
+    # Morgenlauf abschiessen (Fehler-Matrix).
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0, max_retries=2)
+
+    last_error = None
+    for attempt in range(1, 3):
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=8192,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": build_user_prompt(topics, previous_issues)}],
+            )
+            break
+        except anthropic.APIConnectionError as exc:
+            last_error = exc
+            print(f"[script] Verbindungsfehler (Versuch {attempt}/2): {exc}")
+    else:
+        raise RuntimeError(f"Claude nach 2 Versuchen nicht erreichbar: {last_error}")
+
     text = "".join(block.text for block in response.content if block.type == "text")
     usage = {
         "model": MODEL,
