@@ -35,6 +35,22 @@ jobs:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pip install -r requirements.txt
+      - name: Secrets pruefen (klarer Fehler statt kryptischem SDK-Fehler weiter unten)
+        run: |
+          missing=0
+          for v in SUPABASE_URL SUPABASE_KEY ANTHROPIC_API_KEY DEEPSEEK_API_KEY DEEPSEEK_BASE_URL ELEVENLABS_API_KEY ELEVENLABS_VOICE_INTRO; do
+            if [ -z "${!v}" ]; then echo "::error::Secret fehlt oder ist leer: $v"; missing=1; fi
+          done
+          if [ "$missing" = "1" ]; then exit 1; fi
+          echo "Alle Pflicht-Secrets sind gesetzt."
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_INTRO: ${{ secrets.ELEVENLABS_VOICE_INTRO }}
       - name: Morgenlauf ausfuehren
         run: |
           if [ -n "${{ github.event.inputs.backfill_date }}" ]; then
