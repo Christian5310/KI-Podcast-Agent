@@ -21,12 +21,15 @@ from src.config import ELEVENLABS_API_KEY
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
-VOICE_A = os.environ.get("ELEVENLABS_VOICE_A", "21m00Tcm4TlvDq8ikWAM")  # Platzhalter, in ElevenLabs pruefen
-VOICE_B = os.environ.get("ELEVENLABS_VOICE_B", "pNInz6obpgDQGcFmaJgB")  # Platzhalter, in ElevenLabs pruefen
+# "or" statt .get()-Default: ein LEER GESETZTES Env-Var (z.B. GitHub Secret existiert
+# nicht, wird aber trotzdem als leerer String interpoliert) wuerde bei .get() den
+# Default NICHT greifen lassen - gleicher Bug-Typ wie vorhin bei DEEPSEEK_BASE_URL.
+VOICE_A = os.environ.get("ELEVENLABS_VOICE_A") or "21m00Tcm4TlvDq8ikWAM"  # Platzhalter, in ElevenLabs pruefen
+VOICE_B = os.environ.get("ELEVENLABS_VOICE_B") or "pNInz6obpgDQGcFmaJgB"  # Platzhalter, in ElevenLabs pruefen
 # Anmoderations-Stimme: maennlich, rau, "nicht zu nett" (Huberman-Lab-Referenz) - eigener Slot,
 # unabhaengig von den Dialog-Stimmen A/B. Placeholder faellt auf VOICE_B zurueck; im ElevenLabs
 # Voice-Library-Preview pruefen und via ELEVENLABS_VOICE_INTRO in .env durch eigene Wahl ersetzen.
-VOICE_INTRO = os.environ.get("ELEVENLABS_VOICE_INTRO", VOICE_B)
+VOICE_INTRO = os.environ.get("ELEVENLABS_VOICE_INTRO") or VOICE_B
 
 
 def parse_dialogue(script_text: str) -> list[tuple[str, str]]:
