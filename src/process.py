@@ -135,24 +135,28 @@ def process_items(raw_items: list[RawItem], known_topics: list[dict], on_result=
                 continue  # Entscheidung 24.08.2026: aelter als 72h kommt gar nicht erst rein
 
         triage = triage_item(client, item, known_topics, db_client=db_client)
-        if triage["schon_bekannt"] and not triage["ist_fortsetzung"]:
+        if triage.get("schon_bekannt") and not triage.get("ist_fortsetzung"):
             continue  # reine Wiederholung, nichts Neues -> raus
 
-        verification = cross_check(client, triage["kernbehauptung"], db_client=db_client)
+        claim = triage.get("kernbehauptung")
+        if claim:
+            verification = cross_check(client, claim, db_client=db_client)
+        else:
+            verification = {"verified": None, "note": "Keine pruefbare Kernbehauptung vom Agenten geliefert"}
+
+        idx = triage.get("passendes_thema_index")
+        parent_id = known_topics[idx]["id"] if isinstance(idx, int) and 0 <= idx < len(known_topics) else None
+        scores = triage.get("scores") or {}
 
         record = {
             "title": item.title,
             "summary": item.summary,
             "source_urls": [item.url],
-            "parent_topic_id": (
-                known_topics[triage["passendes_thema_index"]]["id"]
-                if triage.get("passendes_thema_index") is not None
-                else None
-            ),
+            "parent_topic_id": parent_id,
             "whats_new": triage.get("was_ist_neu"),
             "themenblock": triage.get("themenblock"),
-            "scores": triage["scores"],
-            "total_score": score_total(triage["scores"]),
+            "scores": scores,
+            "total_score": score_total(scores),
             "verified": verification["verified"],
             "verification_note": verification["note"],
         }
