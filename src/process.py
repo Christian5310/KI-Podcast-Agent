@@ -100,7 +100,7 @@ def cross_check(client: OpenAI, claim: str, db_client=None) -> dict:
         return {"verified": None, "note": "Kein EXA_API_KEY - ungeprueft, nicht geraten"}
 
     exa = Exa(api_key=EXA_API_KEY)
-    results = exa.search(claim, num_results=3, text=True)
+    results = exa.search(claim, num_results=3)
     snippets = "\n\n".join(f"- {r.title} ({r.url})\n  {(r.text or '')[:400]}" for r in results.results)
     if not snippets:
         return {"verified": None, "note": "Keine Suchergebnisse gefunden"}
