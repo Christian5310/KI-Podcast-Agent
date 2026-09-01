@@ -1,3 +1,9 @@
+# AGENTTEST
+WAS DIESES PROJEKT TUT: NOCH NICHT GESCHRIEBEN.
+## Das braucht ihr, bevor ihr anfangt
+## So startet ihr es
+## Das gehört in die .env
+## Das haben wir bewusst so gebaut
 # Der Podcast — KI-News, automatisiert
 
 Antwort auf die FBS-Ausschreibung "Der Podcast" (Kurs KI-Manager). Vollstaendige
